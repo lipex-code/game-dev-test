@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import type { Profile, SupabaseSession } from '@/services/supabase';
 import { supabaseService } from '@/services/supabase';
+import { createSave } from '@/app/game/save/saveSystem';
 
 type AuthUser = {
   id: string;
@@ -147,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setSession(result.session);
     setUser(getAuthUser(result.session, result.profile));
+    await createSave(result.session.user.id);
   };
 
   const login = async (data: LoginData) => {
@@ -163,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setSession(result.session);
     setUser(getAuthUser(result.session, result.profile));
+    await createSave(result.session.user.id);
   };
 
   const logout = async () => {

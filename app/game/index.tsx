@@ -22,6 +22,19 @@ import { SpriteRenderer } from './components/SpriteRenderer';
 import type { CenaKey, CorBala } from './data/cenas';
 import { cenas } from './data/cenas';
 import type { Dialogo, EscolhaNarrativa } from './data/types';
+import {
+  ACT_START_SCENES,
+  CRITICAL_SCENES,
+  getActFromScene,
+  getChapterFromScene,
+} from './save/metadata';
+import {
+  loadSceneState,
+  saveChoice,
+  saveProgress,
+  saveSceneState,
+} from './save/saveSystem';
+import type { SaveCharacterState, SaveCheckpointType, VisualNovelSceneState } from './save/types';
 import { gameStyles } from './styles/gameStyles';
 
 
@@ -29,7 +42,7 @@ const { width } = Dimensions.get('window');
 
 
 export default function Game() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const fadeCena = useRef(new Animated.Value(0)).current;
   const spriteFade = useRef(new Animated.Value(0)).current;
@@ -48,8 +61,11 @@ export default function Game() {
   const [digitando, setDigitando] = useState(false);
   const [configAberta, setConfigAberta] = useState(false);
   const [volumeMusica, setVolumeMusica] = useState(60);
-
-  useGameAudio(cenaAtual, volumeMusica);
+  const [saveCarregado, setSaveCarregado] = useState(false);
+  const [currentBgm, setCurrentBgm] = useState<string | null | undefined>(undefined);
+  const [currentAmbience, setCurrentAmbience] = useState<string | null | undefined>(undefined);
+  const saveInicialAplicadoRef = useRef(false);
+  const salvandoAutomaticoRef = useRef(false);
 
 
   const [mostrarFlashLimbo, setMostrarFlashLimbo] = useState(false);
@@ -107,13 +123,59 @@ export default function Game() {
   const dialogos = cena.dialogos;
   const dialogoAtual = dialogos[dialogoIndex] as Dialogo;
 
+  const getResolvedBackgroundState = (sceneKey: CenaKey, targetDialogueIndex: number) => {
+    const scene = cenas[sceneKey];
+    const safeIndex = Math.min(
+      Math.max(targetDialogueIndex, 0),
+      Math.max(scene.dialogos.length - 1, 0),
+    );
+    let background = scene.background;
+    let zoomAtivo = false;
+
+    for (let index = 0; index <= safeIndex; index++) {
+      const dialogue = scene.dialogos[index] as Dialogo;
+
+      if (dialogue.background) {
+        background = dialogue.background;
+        zoomAtivo = false;
+      }
+
+      if (sceneKey === 'cena9' && dialogue.texto.includes('minhas colegas')) {
+        background = require('../../assets/backgrounds/ato2/ato2cena2.png');
+        zoomAtivo = false;
+      }
+
+      if (sceneKey === 'cena9' && dialogue.texto.includes('Rin e Misuki olham')) {
+        background = require('../../assets/backgrounds/ato2/ato2cena3.png');
+        zoomAtivo = false;
+      }
+
+      if (sceneKey === 'cena9' && dialogue.texto.includes('carteira')) {
+        background = require('../../assets/backgrounds/ato2/ato2cena4.png');
+        zoomAtivo = true;
+      }
+
+      if (sceneKey === 'cena9' && dialogue.texto.includes('janela')) {
+        background = require('../../assets/backgrounds/ato2/ato2cena5.png');
+        zoomAtivo = false;
+      }
+
+      if (sceneKey === 'cena9' && dialogue.nome === 'Aiko' && dialogue.texto === 'O que tem ela?') {
+        background = require('../../assets/backgrounds/ato2/ato2cena3.png');
+        zoomAtivo = false;
+      }
+    }
+
+    return { background, zoomAtivo };
+  };
+
   useGameAudio(
-  cenaAtual,
-  volumeMusica,
-  dialogoAtual?.ambience,
-  dialogoAtual?.bgm,
-  dialogoAtual?.sfx
-);
+    cenaAtual,
+    volumeMusica,
+    currentAmbience,
+    currentBgm,
+    dialogoAtual?.sfx ?? null,
+  );
 
   const spriteMobileBottom = -230;
   const amigaMobileBottom = -230;
@@ -281,6 +343,110 @@ export default function Game() {
 
   const momentoEscolhaNarrativa = escolhasNarrativas.length > 0;
 
+  const getSpriteExpression = (spriteKey: string) => spriteKey.split('_').slice(1).join('_') || spriteKey;
+
+  const createCharacterState = (
+    spriteKey: string,
+    position: string,
+    isSpeaking = false,
+  ): SaveCharacterState => ({
+    id: spriteKey.split('_')[0],
+    sprite: spriteKey,
+    position,
+    expression: getSpriteExpression(spriteKey),
+    isSpeaking,
+  });
+
+  const personagensVisiveis: SaveCharacterState[] = mostrarTrioGuardachuva
+    ? [
+        createCharacterState(aikoTrioGuardachuvaSpriteKey, 'left', dialogoAtual.nome === 'Aiko'),
+        createCharacterState(rinTrioGuardachuvaSpriteKey, 'center', dialogoAtual.nome === 'Rin'),
+        createCharacterState(misukiTrioGuardachuvaSpriteKey, 'right', dialogoAtual.nome === 'Misuki'),
+      ]
+    : mostrarAmigas
+      ? [
+          createCharacterState(rinSpriteKey, 'left', rinFalando),
+          createCharacterState(misukiSpriteKey, 'right', misukiFalando),
+        ]
+      : mostrarAikoRin
+        ? [
+            createCharacterState(rinDuplaSpriteKey, 'left', rinDuplaFalando),
+            createCharacterState(aikoDuplaSpriteKey, 'right', aikoFalando),
+          ]
+        : mostrarGarotosSupervisora
+          ? [
+              createCharacterState(sotaSpriteKey, 'left', sotaFalando),
+              createCharacterState(supervisoraSpriteKey, 'center', supervisoraFalando),
+              createCharacterState(tsubasaSpriteKey, 'right', tsubasaFalando),
+            ]
+          : mostrarGarotos
+            ? [
+                createCharacterState(sotaSpriteKey, 'left', sotaFalando),
+                createCharacterState(tsubasaSpriteKey, 'right', tsubasaFalando),
+              ]
+            : spritePrincipalKey
+              ? [createCharacterState(spritePrincipalKey, 'center', true)]
+              : [];
+
+  const getCurrentBackgroundKey = () => {
+    if (momentoEscolhaBalinhas) {
+      return 'choices/balinhas1choice';
+    }
+
+    if (dialogoAtual.background) {
+      return `${cenaAtual}:${dialogoIndex}:dialogue_background`;
+    }
+
+    if (cenaAtual === 'cena9') {
+      return `${cenaAtual}:${dialogoIndex}:derived_background`;
+    }
+
+    return cenaAtual;
+  };
+
+  const criarEstadoCena = (
+    overrides: Partial<VisualNovelSceneState> = {},
+  ): VisualNovelSceneState => {
+    const cenaSnapshot = overrides.currentScene ?? cenaAtual;
+    const indiceSnapshot = overrides.dialogueIndex ?? dialogoIndex;
+    const dialogoSnapshot = (cenas[cenaSnapshot].dialogos[indiceSnapshot] ?? dialogoAtual) as Dialogo;
+    const textoSnapshot =
+      cenaSnapshot === cenaAtual && indiceSnapshot === dialogoIndex
+        ? textoDialogoAtual
+        : dialogoSnapshot.texto;
+
+    return {
+      currentAct: getActFromScene(cenaSnapshot),
+      currentChapter: getChapterFromScene(cenaSnapshot),
+      currentScene: cenaSnapshot,
+      dialogueIndex: indiceSnapshot,
+      speakerName: dialogoSnapshot.nome ?? '',
+      dialogueText: textoSnapshot,
+      currentBackground:
+        cenaSnapshot === cenaAtual && indiceSnapshot === dialogoIndex
+          ? getCurrentBackgroundKey()
+          : cenaSnapshot,
+      characters:
+        cenaSnapshot === cenaAtual && indiceSnapshot === dialogoIndex ? personagensVisiveis : [],
+      currentMusic: (dialogoSnapshot.bgm ?? currentBgm ?? null) as string | null,
+      currentAmbience: (dialogoSnapshot.ambience ?? currentAmbience ?? null) as string | null,
+      currentSfx: dialogoSnapshot.sfx ?? null,
+      choices: corEscolhida ? { candy_color: corEscolhida } : {},
+      flags: corEscolhida ? { [`candy_${corEscolhida.toLowerCase()}`]: true } : {},
+      events: {
+        [`entered_${cenaSnapshot}`]: true,
+      },
+      variables: {
+        candy_color: corEscolhida,
+      },
+      unlockedItems: [],
+      unlockedGallery: [],
+      unlockedCgs: [],
+      candyChoice: corEscolhida,
+      ...overrides,
+    };
+  };
+
   const girarEngrenagem = () => {
     rotateAnim.setValue(0);
 
@@ -290,6 +456,63 @@ export default function Game() {
       useNativeDriver: true,
     }).start();
   };
+
+  useEffect(() => {
+    if (dialogoAtual.bgm !== undefined) {
+      setCurrentBgm(dialogoAtual.bgm);
+    }
+
+    if (dialogoAtual.ambience !== undefined) {
+      setCurrentAmbience(dialogoAtual.ambience);
+    }
+  }, [cenaAtual, dialogoIndex, dialogoAtual.bgm, dialogoAtual.ambience]);
+
+  useEffect(() => {
+    if (!user?.id || !saveCarregado || !saveInicialAplicadoRef.current) return;
+
+    let cancelado = false;
+
+    const timer = setTimeout(async () => {
+      if (cancelado || salvandoAutomaticoRef.current) return;
+
+      const checkpoint: SaveCheckpointType = momentoEscolhaNarrativa
+        ? 'before_choice'
+        : dialogoIndex === 0 && ACT_START_SCENES.has(cenaAtual)
+          ? 'act_start'
+          : dialogoIndex === 0
+            ? 'chapter_start'
+            : CRITICAL_SCENES.has(cenaAtual)
+              ? 'before_critical_scene'
+              : 'scene';
+
+      try {
+        salvandoAutomaticoRef.current = true;
+        await saveProgress(user.id, {
+          ...criarEstadoCena(),
+          checkpoint,
+        });
+      } catch (error) {
+        console.warn('Falha no salvamento automatico:', error);
+      } finally {
+        salvandoAutomaticoRef.current = false;
+      }
+    }, 450);
+
+    return () => {
+      cancelado = true;
+      clearTimeout(timer);
+    };
+  }, [
+    user?.id,
+    saveCarregado,
+    cenaAtual,
+    dialogoIndex,
+    textoDialogoAtual,
+    corEscolhida,
+    currentBgm,
+    currentAmbience,
+    momentoEscolhaNarrativa,
+  ]);
 
   useEffect(() => {
     let componenteAtivo = true;
@@ -365,7 +588,62 @@ export default function Game() {
   }, []);
 
   useEffect(() => {
-    if (!assetsCarregados) return;
+    let ativo = true;
+
+    const restaurarSave = async () => {
+      if (!user?.id) {
+        setSaveCarregado(true);
+        return;
+      }
+
+      try {
+        const save = await loadSceneState(user.id);
+
+        if (!ativo) return;
+
+        const cenaSalva = save.currentScene in cenas ? save.currentScene : 'cena1';
+        const dialogosCena = cenas[cenaSalva].dialogos;
+        const indiceSalvo = Math.min(
+          Math.max(save.dialogueIndex ?? 0, 0),
+          Math.max(dialogosCena.length - 1, 0),
+        );
+
+        setCenaAtual(cenaSalva);
+        setDialogoIndex(indiceSalvo);
+        setCorEscolhida(save.candyChoice);
+        setCurrentBgm(save.currentMusic);
+        setCurrentAmbience(save.currentAmbience);
+        const backgroundSalvo = getResolvedBackgroundState(cenaSalva, indiceSalvo);
+        cena9BackgroundAtualRef.current = backgroundSalvo.background;
+        ultimoBackgroundRef.current = backgroundSalvo.background;
+        cena9ZoomAtivoRef.current = backgroundSalvo.zoomAtivo;
+        setCena9BackgroundAtual(backgroundSalvo.background);
+        setCena9BackgroundAnterior(null);
+        setCena9ZoomAtivo(backgroundSalvo.zoomAtivo);
+        cena9TransicaoOpacity.setValue(1);
+        cena9Zoom.setValue(backgroundSalvo.zoomAtivo ? 1.08 : 1);
+        fadeAnim.setValue(cenaSalva === 'cena1' && indiceSalvo === 0 ? 1 : 0);
+      } catch (error) {
+        console.warn('Nao foi possivel carregar o save:', error);
+        fadeAnim.setValue(1);
+      } finally {
+        if (ativo) {
+          saveInicialAplicadoRef.current = true;
+          setSaveCarregado(true);
+        }
+      }
+    };
+
+    restaurarSave();
+
+    return () => {
+      ativo = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!assetsCarregados || !saveCarregado) return;
+    if (!(cenaAtual === 'cena1' && dialogoIndex === 0)) return;
 
     mostrarTelaAto('ATO I');
 
@@ -406,7 +684,7 @@ export default function Game() {
         }),
       ]),
     ]).start();
-  }, [assetsCarregados]);
+  }, [assetsCarregados, saveCarregado]);
 
   useEffect(() => {
     if (!assetsCarregados) return;
@@ -620,6 +898,14 @@ export default function Game() {
     }
 
     if (!proximaCena) {
+      if (user?.id) {
+        void saveProgress(user.id, {
+          ...criarEstadoCena(),
+          completedAct: 3,
+          checkpoint: 'act_complete',
+        });
+      }
+
       Animated.timing(fadeCena, {
         toValue: 1,
         duration: 1800,
@@ -643,6 +929,18 @@ export default function Game() {
     const tituloDoAto = proximaCena === 'cena9' ? 'ATO II' : proximaCena === 'cena49' ? 'ATO III' : '';
     const deveFazerFade = backgroundAtual !== proximoBackground || deveMostrarTituloAto;
     const duracaoFade = cenaAtual === 'cena19' && proximaCena === 'cena20' ? 1600 : 350;
+    const atoConcluido = proximaCena === 'cena9' ? 1 : proximaCena === 'cena49' ? 2 : undefined;
+
+    if (user?.id && atoConcluido) {
+      void saveProgress(user.id, {
+        ...criarEstadoCena({
+          currentScene: proximaCena as CenaKey,
+          dialogueIndex: 0,
+        }),
+        completedAct: atoConcluido,
+        checkpoint: 'act_complete',
+      });
+    }
 
     const mudarCena = () => {
       setCenaAtual(proximaCena as CenaKey);
@@ -684,6 +982,24 @@ export default function Game() {
   };
 
   const escolherBalinha = (cor: CorBala) => {
+    if (user?.id) {
+      void saveChoice(user.id, {
+        choiceId: 'cena6_balinhas',
+        value: cor,
+      });
+
+      void saveProgress(user.id, {
+        ...criarEstadoCena({
+          dialogueIndex: dialogoIndex + 1,
+          candyChoice: cor,
+          choices: { candy_color: cor },
+          flags: { [`candy_${cor.toLowerCase()}`]: true },
+          variables: { candy_color: cor },
+        }),
+        checkpoint: 'after_choice',
+      });
+    }
+
     setCorEscolhida(cor);
     setMomentoEscolhaBalinhas(false);
     setMostrarOpcoesBalinhas(false);
@@ -705,6 +1021,25 @@ export default function Game() {
     const deveMostrarTituloAto = cenaDestino === 'cena9' || cenaDestino === 'cena49';
     const tituloDoAto = cenaDestino === 'cena9' ? 'ATO II' : cenaDestino === 'cena49' ? 'ATO III' : '';
     const deveFazerFade = backgroundAtual !== proximoBackground || deveMostrarTituloAto;
+    const choiceId = `${cenaAtual}_${dialogoIndex}_${cenaDestino}`;
+
+    if (user?.id) {
+      void saveChoice(user.id, {
+        choiceId,
+        value: true,
+        nextScene: cenaDestino,
+      });
+
+      void saveProgress(user.id, {
+        ...criarEstadoCena({
+          currentScene: cenaDestino as CenaKey,
+          dialogueIndex: 0,
+          choices: { [choiceId]: true },
+          flags: { [`route_${cenaDestino}`]: true },
+        }),
+        checkpoint: 'after_choice',
+      });
+    }
 
     const mudarCena = () => {
       setCenaAtual(cenaDestino as CenaKey);
@@ -829,12 +1164,15 @@ export default function Game() {
     setVolumeMusica((valor) => Math.min(100, valor + 10));
   };
 
-  const salvarJogo = () => {
-    console.log('Jogo salvo:', {
-      cenaAtual,
-      dialogoIndex,
-      corEscolhida,
-    });
+  const salvarJogo = async () => {
+    if (!user?.id) return;
+
+    try {
+      await saveSceneState(user.id, criarEstadoCena());
+      setConfigAberta(false);
+    } catch (error) {
+      console.warn('Nao foi possivel salvar manualmente:', error);
+    }
   };
 
   const voltarMenu = async () => {
@@ -842,7 +1180,7 @@ export default function Game() {
     router.replace('/');
   };
 
-  if (!assetsCarregados) {
+  if (!assetsCarregados || !saveCarregado) {
     return (
       <View
         style={[

@@ -24,7 +24,7 @@ function RootLayoutContent() {
   useEffect(() => {
     if (isLoading) return;
 
-    const isPublicRoute = pathname === '/';
+    const isPublicRoute = pathname === '/' || pathname.startsWith('/game');
 
     if (!user && !isPublicRoute) {
       router.replace('/');
@@ -44,7 +44,7 @@ function RootLayoutContent() {
         >
           <ActivityIndicator color="#d9c7ff" />
         </View>
-        <StatusBar style="auto" />
+        <StatusBar hidden />
       </ThemeProvider>
     );
   }
@@ -56,7 +56,7 @@ function RootLayoutContent() {
         <Stack.Screen name="game" />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
-      <StatusBar style="auto" />
+      <StatusBar hidden />
     </ThemeProvider>
   );
 }

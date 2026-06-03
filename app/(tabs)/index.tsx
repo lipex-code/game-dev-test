@@ -85,7 +85,7 @@ export default function Home() {
     }))
   ).current;
 
-  const abrirJogo = async () => {
+  const abrirJogo = async (exigirConta = true) => {
   if (menuMusicRef.current) {
     for (let volume = volumeMusica; volume >= 0; volume -= 5) {
       await menuMusicRef.current.setVolumeAsync(volume / 100);
@@ -97,7 +97,7 @@ export default function Home() {
     menuMusicRef.current = null;
   }
 
-    if (user) {
+    if (user || !exigirConta) {
     router.replace('/game');
       return;
     }
@@ -892,7 +892,7 @@ export default function Home() {
             <TouchableOpacity
               onPress={() => {
                 setAvisoOfflineAberto(false);
-                abrirJogo();
+                abrirJogo(false);
               }}
               activeOpacity={0.85}
               style={{
@@ -914,7 +914,10 @@ export default function Home() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => setAvisoOfflineAberto(false)}
+              onPress={() => {
+                setAvisoOfflineAberto(false);
+                setLoginAberto(true);
+              }}
               activeOpacity={0.85}
               style={{
                 backgroundColor: 'rgba(255,255,255,0.07)',
