@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Last Light Way",
-    "slug": "meuJogo",
+    "slug": "last-light-way",
     "version": "1.0.0",
     "orientation": "portrait",
 
@@ -28,8 +28,8 @@
     "androidStatusBar": {
       "hidden": true,
       "translucent": true,
-      "backgroundColor": "#FFFFFF",
-      "barStyle": "dark-content"
+      "backgroundColor": "#000000",
+      "barStyle": "light-content"
     },
 
     "androidNavigationBar": {
@@ -51,7 +51,7 @@
           "image": "./assets/logo.png",
           "imageWidth": 250,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#000000"
         }
       ],
       "@react-native-community/datetimepicker"
